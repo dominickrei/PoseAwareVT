@@ -1,0 +1,59 @@
+TRAIN:
+  ENABLE: True
+  FINETUNE: True
+  DATASET: smarthome # or 'ntu'. Use 'smarthome' for NUCLA
+  BATCH_SIZE: 64 # 64
+  EVAL_PERIOD: 5
+  CHECKPOINT_FILE_PATH: /path/to/TimeSformer_divST_8x32_224_K400.pyth
+  CHECKPOINT_PERIOD: 5
+  AUTO_RESUME: False
+DATA:
+  PATH_TO_DATA_DIR: /path/to/smarthome/ # See data setup in github repo
+  NUM_FRAMES: 8 # 16 for NTU and NUCLA
+  ENSEMBLE_METHOD: 'max'
+  SAMPLING_RATE: 32 # 4 for NTU and NUCLA
+  TRAIN_JITTER_SCALES: [256, 320]
+  TRAIN_CROP_SIZE: 224
+  TEST_CROP_SIZE: 224
+  INPUT_CHANNEL_NUM: [3]
+  PATH_LABEL_SEPARATOR: ","
+TIMESFORMER:
+  ATTENTION_TYPE: 'divided_space_time'
+  DEPTH: 12
+EXPERIMENTAL:
+    POSE_BLOCK_POS: [1] # Controls the position of PAAT blocks. 1-indexed (e.g., to place after the first block, set to POSE_BLOCK_POS=1). Including multiple postitions will insert a PAAT at each position
+    POSE_BLOCK_ATTN: ['spatial_auxtaskonly'] # Controls which attention variant to use.  For PAAT, only use 'spatial_auxtaskonly'. Should be a list with the same length as POSE_BLOCK_POS
+WANDB:
+  ENABLE: False
+  PROJECT_NAME: pose_in_pixels
+  EXPERIMENT_NAME: 'smarthome_paat_layer1'
+  SAVE_LAST_CHECKPOINT: True
+  SAVE_OPTIMIZER_STATE: False
+SOLVER:
+  BASE_LR: 0.005
+  LR_POLICY: steps_with_relative_lrs
+  STEPS: [0, 11, 14]
+  LRS: [1, 0.1, 0.01]
+  MAX_EPOCH: 15
+  MOMENTUM: 0.9
+  WEIGHT_DECAY: 1e-4
+  OPTIMIZING_METHOD: sgd
+MODEL:
+  MODEL_NAME: vit_poseblock_auxloss_patch16_224
+  NUM_CLASSES: 31 # 31 for Smarthome cross-subject. 19 for Smarthome cross-view. 60 for NTU60. 10 for NUCLA.
+  ARCH: vit 
+  LOSS_FUNC: posemask_loss
+  DROPOUT_RATE: 0.5
+TEST:
+  ENABLE: True
+  DATASET: smarthome # or 'ntu'. Use 'smarthome' for NUCLA
+  BATCH_SIZE: 64
+  NUM_ENSEMBLE_VIEWS: 10
+  NUM_SPATIAL_CROPS: 1
+DATA_LOADER:
+  NUM_WORKERS: 8
+  PIN_MEMORY: True
+NUM_GPUS: 8
+NUM_SHARDS: 1
+RNG_SEED: 45
+OUTPUT_DIR: ./
