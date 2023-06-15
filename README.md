@@ -33,11 +33,8 @@ cd PoseAwareVT
 python setup.py build develop
 ```
 
-## Usage
-Coming soon!
-
 ## Data preparation
-We make use of the following action recognition datasets for evaluation: [Toyota Smarthome](https://project.inria.fr/toyotasmarthome/), [NTU RGB+D](https://rose1.ntu.edu.sg/dataset/actionRecognition/), and [Northwestern-UCLA](https://wangjiangb.github.io/my_data.html). Please download the datasets from their respective sources and structure their directories in the following formats.
+We make use of the following action recognition datasets for evaluation: [Toyota Smarthome](https://project.inria.fr/toyotasmarthome/), [NTU RGB+D](https://rose1.ntu.edu.sg/dataset/actionRecognition/), and [Northwestern-UCLA](https://wangjiangb.github.io/my_data.html). Download the datasets from their respective sources and structure their directories in the following formats.
 
 ### Smarthome
 ```
@@ -87,8 +84,30 @@ We make use of the following action recognition datasets for evaluation: [Toyota
         ├── S01A01E01V01_skeleton2d.json
         ├── ...
 ```
-* By default, Northwestern-UCLA does not provide 2D skeletons. We extract 2D skeletons using [OpenPose](https://github.com/CMU-Perceptual-Computing-Lab/openpose) and format the 2D skeletons in the same format as Toyota Smarthome.
+* By default, Northwestern-UCLA does not provide 2D skeletons. We extract 2D skeletons using [OpenPose](https://github.com/CMU-Perceptual-Computing-Lab/openpose) and format them in the same way as Toyota Smarthome skeletons.
     * (coming soon) Google Drive download of extracted 2D skeletons
+ 
+### Preparing CSVs
+After downloading and preparing the datasets, prepare the CSVs for training, testing, and validation splits as `train.csv`, `test.csv`, and `val.csv`. The format of each CSV is:
+```
+path_to_video_1,path_to_video_1_2dskeleton,label_1
+path_to_video_2,path_to_video_2_2dskeleton,label_2
+...
+path_to_video_N,path_to_video_N_2dskeleton,label_N
+```
+
+## Usage
+First, download the Kinetics pre-trained backbone TimeSformer model from [here](https://www.dropbox.com/s/g5t24we9gl5yk88/TimeSformer_divST_8x32_224_K400.pyth?dl=0). Then, update `TRAIN.CHECKPOINT_FILE_PATH` in each config to point to the downloaded model. We provide two configs, `configs/PAAB_SH_CS.yaml` and `configs/PAAT_SH_CS.yaml`, that can be use to train TimeSformer with PAAB and PAAT respectively. By default, the config is setup for training on the Smarthome CS protocol. Modify the configs to train on other datasets (see comments in the config files).
+
+Train a TimeSformer model on Smarthome with a single PAAB inserted at position 12 with the following command:
+
+`python tools/run_net.py --cfg configs/PAAB_SH_CS.yaml NUM_GPUS 4 TRAIN.BATCH_SIZE 32 TEST.BATCH_SIZE 32`
+
+Train a TimeSformer model on Smarthome with PAAT inserted at position 1 with the following command:
+
+`python tools/run_net.py --cfg configs/PAAT_SH_CS.yaml NUM_GPUS 4 TRAIN.BATCH_SIZE 32 TEST.BATCH_SIZE 32`
+
+
  
 ## Citation & Acknowledgement
 ```
