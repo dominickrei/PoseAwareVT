@@ -22,7 +22,7 @@ TIMESFORMER:
   DEPTH: 12
 EXPERIMENTAL:
   NUM_POSE_BLOCKS: 1 # Controls the number of PAAB blocks to insert at each specified layer (specified in POSE_BLOCK_POS)
-  POSE_BLOCK_POS: [1] # Controls the position of PAAB blocks. 1-indexed (e.g., to place after the first block, set to POSE_BLOCK_POS=1). Including multiple postitions will insert a PAAB at each position
+  POSE_BLOCK_POS: [12] # Controls the position of PAAB blocks. 1-indexed (e.g., to place after the first block, set to POSE_BLOCK_POS=1). Including multiple postitions will insert a PAAB at each position
   POSE_BLOCK_ATTN: ['spatial'] # Controls which attention variant to use.  For PAAB, choose one of 'spatial', 'spatiotemporal', 'joint'. Should be a list with the same length as POSE_BLOCK_POS
 WANDB:
   ENABLE: False
