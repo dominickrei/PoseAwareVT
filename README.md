@@ -115,9 +115,10 @@ Train a TimeSformer model on Smarthome with PAAT inserted at position 1 with the
     title={Seeing the Pose in the Pixels: Learning Pose-Aware Representations in Vision Transformers},
     author={Dominick Reilly and Aman Chadha and Srijan Das},
     journal={arXiv preprint},
+    archivePrefix={arXiv},
     year={2023},
-    eprint={},
+    eprint={2306.09331}
 }
 ```
 
-We thank the implementations of [TimeSformer](https://github.com/facebookresearch/TimeSformer) and [OpenPose](https://github.com/CMU-Perceptual-Computing-Lab/openpose).
+We thank Facebook Research for their [TimeSformer](https://github.com/facebookresearch/TimeSformer) implementation and the CMU Perceptual Computing Lab for their [OpenPose](https://github.com/CMU-Perceptual-Computing-Lab/openpose) implementation.
