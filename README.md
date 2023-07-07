@@ -28,7 +28,7 @@ Then, install the following packages:
 
 Lastly, build the codebase by running:
 ```
-git clone https://github.com/facebookresearch/PoseAwareVT
+git clone https://github.com/dominickrei/PoseAwareVT
 cd PoseAwareVT
 python setup.py build develop
 ```
