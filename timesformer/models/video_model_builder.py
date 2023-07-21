@@ -21,8 +21,6 @@ import copy
 
 import numpy as np
 from timesformer.models.vit import vit_base_patch16_224
-from timesformer.models.vit_pose_attended import dual_branch_timesformer_patch16_224
-from timesformer.models.vit_pose_attended_uniform_hbg import dual_branch_timesformer_uniformhbg_patch16_224
 from timesformer.models.vit_poseblock import vit_poseblock_patch16_224
 from timesformer.models.vit_poseblock_auxloss import vit_poseblock_auxloss_patch16_224
 
