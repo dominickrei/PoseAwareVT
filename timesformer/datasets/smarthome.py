@@ -2,6 +2,8 @@
 
 import os
 import random
+import numpy as np
+
 import torch
 import torch.utils.data
 from fvcore.common.file_io import PathManager
@@ -122,6 +124,9 @@ class Smarthome(torch.utils.data.Dataset):
             )
         )
 
+        if self.cfg.EXPERIMENTAL.DEBUG.RANDOM_MASK:
+            logger.warning('Using random keypoint mask for debugging (EXPERIMENTAL.DEBUG.RANDOM_MASK is True). Make sure this is what you want.')
+
     def __getitem__(self, index):
         """
         Given the video index, return the list of frames, label, and video
@@ -230,7 +235,7 @@ class Smarthome(torch.utils.data.Dataset):
                 continue
 
             # Decode video. Meta info is used to perform selective decoding.
-            frames, sampled_frame_idxs = decoder.decode(
+            decode_result = decoder.decode(
                 video_container,
                 sampling_rate,
                 self.cfg.DATA.NUM_FRAMES,
@@ -244,7 +249,7 @@ class Smarthome(torch.utils.data.Dataset):
 
             # If decoding failed (wrong format, video is too short, and etc),
             # select another video.
-            if frames is None:
+            if decode_result is None:
                 logger.warning(
                     "Failed to decode video idx {} from {}; trial {}".format(
                         index, self._path_to_videos[index], i_try
@@ -255,10 +260,11 @@ class Smarthome(torch.utils.data.Dataset):
                     index = random.randint(0, len(self._path_to_videos) - 1)
                 continue
 
+            frames, sampled_frame_idxs = decode_result[0], decode_result[1]
             label = self._labels[index]
 
             # Load keypoints before data augmentation
-            keypoints, mask, njts, K = pose_utils.json_2_keypoints(self._path_to_poses[index])
+            keypoints, mask, njts = pose_utils.json_2_keypoints(self._path_to_poses[index])
 
             keypoints = keypoints[sampled_frame_idxs]
 
@@ -286,13 +292,28 @@ class Smarthome(torch.utils.data.Dataset):
             )
 
             # Generate the attention mask from the keypoints
-            keypoint_attention_mask = pose_utils.keypoints_2_patch_idx(
-                keypoints=keypoints, 
-                patch_size=16, 
-                frame_height=self.cfg.DATA.TRAIN_CROP_SIZE, 
-                frame_width=self.cfg.DATA.TRAIN_CROP_SIZE,
-                inflation=self.cfg.DUAL_BRANCH_TIMESFORMER.POSE_INFLATION
-            )
+            # grab 2D joints
+            if self.cfg.MODEL.MODEL_NAME != 'vit_poseblock_auxloss_patch16_224':
+                keypoint_attention_mask = pose_utils.keypoints_2_patch_idx(
+                    keypoints=keypoints, 
+                    patch_size=16, 
+                    frame_height=self.cfg.DATA.TRAIN_CROP_SIZE, 
+                    frame_width=self.cfg.DATA.TRAIN_CROP_SIZE,
+                    inflation=self.cfg.DUAL_BRANCH_TIMESFORMER.POSE_INFLATION
+                )
+            # grab 3D joints
+            else:
+                keypoint_attention_mask = pose_utils.keypoints_2_patch_joint_labels(
+                    keypoints=keypoints,
+                    patch_size=16,
+                    frame_height=self.cfg.DATA.TRAIN_CROP_SIZE,
+                    frame_width=self.cfg.DATA.TRAIN_CROP_SIZE,
+                    njts=njts,
+                )
+
+            # Random joints if desired
+            if self.cfg.EXPERIMENTAL.DEBUG.RANDOM_MASK:
+                keypoint_attention_mask = np.random.randint(0, 2, keypoint_attention_mask.shape)
                 
             if self.cfg.EXPERIMENTAL.DEBUG.MASK_FILL is None:
                 keypoint_attention_mask = torch.tensor(keypoint_attention_mask)

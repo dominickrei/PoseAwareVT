@@ -41,10 +41,12 @@ class Block(nn.Module):
 
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0.1, act_layer=nn.GELU, norm_layer=nn.LayerNorm, attention_type='divided_space_time',
-                 is_pose_block=False, num_pose_blocks=1, pose_block_attention=None):
+                 is_pose_block=False, num_pose_blocks=1, pose_block_attention=None, num_joints=13):
         super().__init__()
         self.attention_type = attention_type
         assert(attention_type in ['divided_space_time', 'space_only','joint_space_time'])
+
+        self.num_joints = num_joints
 
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
@@ -69,7 +71,7 @@ class Block(nn.Module):
         if self.is_pose_block:
             self.pose_blocks = nn.ModuleList([
                 get_pose_block(self.pose_block_attention, norm_layer=norm_layer, embed_dim=dim, num_heads=num_heads, qkv_bias=qkv_bias,
-                          qk_scale=qk_scale, attn_drop=attn_drop, drop=drop, act_layer=act_layer, mlp_ratio=mlp_ratio, drop_path=drop_path)
+                          qk_scale=qk_scale, attn_drop=attn_drop, drop=drop, act_layer=act_layer, mlp_ratio=mlp_ratio, drop_path=drop_path, num_joints=self.num_joints)
                 for i in range(num_pose_blocks)]
             )
 
@@ -155,192 +157,25 @@ class PatchEmbed(nn.Module):
         return x, T, W
 
 def get_pose_block(attention_type, **kwargs):
-    if attention_type == 'spatial':
-        return PoseBlockSpatial(**kwargs)
-    elif attention_type == 'spatiotemporal':
-        return PoseBlockSpatioTemporal(**kwargs)
-    elif attention_type == 'joint':
-        return PoseBlockJointST(**kwargs)
-    elif attention_type == 'spatial_auxtaskonly':
+    if attention_type == 'spatial_auxtaskonly':
         return PoseBlockSpatial_AuxTaskOnly(**kwargs)
     else:
         raise NotImplementedError('Specified attention type not available')
 
-
-
-class PoseBlockSpatial(nn.Module):
-    def __init__(self, norm_layer=nn.LayerNorm, embed_dim=768, num_heads=12, qkv_bias=False, qk_scale=None, attn_drop=0, 
-                 drop=0, act_layer=nn.GELU, mlp_ratio=4, drop_path=0.1):
-        super().__init__()
-        self.norm1 = norm_layer(embed_dim)
-        self.attn = Attention(
-           embed_dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        self.norm2 = norm_layer(embed_dim)
-        mlp_hidden_dim = int(embed_dim * mlp_ratio)
-        self.mlp = Mlp(in_features=embed_dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
-        # Aux loss
-        num_spatial_tokens = 196
-
-#        self.learned_mask_proj = nn.Linear(embed_dim, num_spatial_tokens+1) # +1 for cls_token
-        self.learned_mask_k = nn.Linear(embed_dim, embed_dim)
-        self.learned_mask_q = nn.Linear(embed_dim, embed_dim)
-
-#        nn.init.constant_(self.learned_mask_proj.weight, 0)
-#        nn.init.constant_(self.learned_mask_proj.bias, 0)
-        nn.init.constant_(self.learned_mask_q.weight, 0)
-        nn.init.constant_(self.learned_mask_q.bias, 0)
-        nn.init.constant_(self.learned_mask_k.weight, 0)
-        nn.init.constant_(self.learned_mask_k.bias, 0)
-
-
-    '''
-    PoseBlock does additional spatial attention over patches containing poses
-
-    Expects the input, x, to be shape (B, TN+1, 768)
-    Output will be shape (B, TN+1, 768)
-    '''
-    def forward(self, x, B, T, H, W):
-        res = x # store initial x for residual computation later
-
-        ## Spatial attention between pose patches
-        # Convert shape of input to (BT, N+1, 768)
-        cls_token = x[:, 0, :].unsqueeze(1)
-        cls_token = cls_token.repeat(1, T, 1) # while doing spatial attention, each frame will get a cls_token
-        cls_token = rearrange(cls_token, 'b t m -> (b t) m', b=B, t=T).unsqueeze(1)
-        x = rearrange(x[:, 1:, :], 'b (h w t) m -> (b t) (h w) m',b=B,h=H,w=W,t=T)
-        x = torch.cat((cls_token, x), 1) # shape is now (BT, N+1, 768)
-
-        # Process mask
-#        learned_mask = self.learned_mask_proj(x) # B*T,N+1,N+1
-        learned_mask = self.learned_mask_q(x) @ self.learned_mask_k(x).transpose(-1, 1)
-        learned_mask[:, 0, 0] = 100 # always attend cls_token to itself
-        learned_mask = nn.Sigmoid()(learned_mask)
-
-        attn = self.attn(self.norm1(x), learned_mask)
-        x = self.drop_path(attn)
-
-        # Each frame was given a cls_token, avg all frame cls_tokens here
-        cls_token = x[:, 0, :]
-        cls_token = rearrange(cls_token, '(b t) m -> b t m',b=B,t=T)
-        cls_token = torch.mean(cls_token,1,True) ## averaging for every frame
-
-        # Reshape x back into (B, TN+1, 768)
-        x = x[:, 1:, :]
-        x = rearrange(x, '(b t) (h w) m -> b (h w t) m', b=B, h=H, w=W, t=T)
-        x = torch.cat((cls_token, x), 1) # shape is now (B, TN+1, 768)
-
-        # Deal with residuals
-        x = res + x # residual of pose-attention features and input features
-
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-
-        return x, learned_mask
-
-class PoseBlockSpatioTemporal(nn.Module):
-    def __init__(self, norm_layer=nn.LayerNorm, embed_dim=768, num_heads=12, qkv_bias=False, qk_scale=None, attn_drop=0, 
-                 drop=0, act_layer=nn.GELU, mlp_ratio=4, drop_path=0.1):
-        super().__init__()
-        self.norm1 = norm_layer(embed_dim)
-        self.attn = Attention(
-           embed_dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        self.norm2 = norm_layer(embed_dim)
-        mlp_hidden_dim = int(embed_dim * mlp_ratio)
-        self.mlp = Mlp(in_features=embed_dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-
-        # Temporal attention modules
-        self.temporal_norm1 = norm_layer(embed_dim)
-        self.temporal_attn = Attention(
-            embed_dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        self.temporal_fc = nn.Linear(embed_dim, embed_dim)
-
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
-    '''
-    PoseBlock does additional spatial attention over patches containing poses
-
-    Expects the input, x, to be shape (B, TN+1, 768)
-    Output will be shape (B, TN+1, 768)
-    '''
-    def forward(self, x, mask, B, T, H, W):
-        ## Temporal
-        xt = x[:,1:,:]
-        xt = rearrange(xt, 'b (h w t) m -> (b h w) t m',b=B,h=H,w=W,t=T)
-        attn = self.temporal_attn(self.temporal_norm1(xt))
-        res_temporal = self.drop_path(attn)
-        res_temporal = rearrange(res_temporal, '(b h w) t m -> b (h w t) m',b=B,h=H,w=W,t=T)
-        res_temporal = self.temporal_fc(res_temporal)
-        xt = x[:,1:,:] + res_temporal
-
-
-        ## Spatial attention between pose patches
-        # Convert shape of input to (BT, N+1, 768)
-        init_cls_token = x[:, 0, :].unsqueeze(1)
-        cls_token = init_cls_token.repeat(1, T, 1) # while doing spatial attention, each frame will get a cls_token
-        cls_token = rearrange(cls_token, 'b t m -> (b t) m', b=B, t=T).unsqueeze(1)
-
-        xs = xt
-        xs = rearrange(xs, 'b (h w t) m -> (b t) (h w) m',b=B,h=H,w=W,t=T)
-        xs = torch.cat((cls_token, xs), 1) # shape is now (BT, N+1, 768)
-
-        attn = self.attn(self.norm1(xs), mask)
-        res_spatial = self.drop_path(attn)
-
-        # Each frame was given a cls_token, avg all frame cls_tokens here so we have a cls_token for each video in batch
-        cls_token = res_spatial[:, 0, :]
-        cls_token = rearrange(cls_token, '(b t) m -> b t m',b=B,t=T)
-        cls_token = torch.mean(cls_token,1,True) ## averaging for every frame. shape is (B, 1, embed_dim)
-
-        # Reshape & add cls token to reshape spatial result back into (B, TN+1, 768)
-        res_spatial = res_spatial[:, 1:, :]
-        res_spatial = rearrange(res_spatial, '(b t) (h w) m -> b (h w t) m', b=B, h=H, w=W, t=T)
-
-        # Compute residual between temporal attention result and spatial attention result
-        x = torch.cat((init_cls_token, xt), 1) + torch.cat((cls_token, res_spatial), 1)
-
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-
-        return x
-
-class PoseBlockJointST(nn.Module):
-    def __init__(self, norm_layer=nn.LayerNorm, embed_dim=768, num_heads=12, qkv_bias=False, qk_scale=None, attn_drop=0, 
-                 drop=0, act_layer=nn.GELU, mlp_ratio=4, drop_path=0.1):
-        super().__init__()
-        self.norm1 = norm_layer(embed_dim)
-        self.attn = Attention(
-           embed_dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
-        self.norm2 = norm_layer(embed_dim)
-        mlp_hidden_dim = int(embed_dim * mlp_ratio)
-        self.mlp = Mlp(in_features=embed_dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-
-    '''
-    PoseBlock does additional spatial attention over patches containing poses
-
-    Expects the input, x, to be shape (B, TN+1, 768)
-    Output will be shape (B, TN+1, 768)
-    '''
-    def forward(self, x, human_mask, B, T, H, W):
-        x = x + self.drop_path(self.attn(self.norm1(x), human_mask))
-        x = x + self.drop_path(self.mlp(self.norm2(x)))
-
-        return x
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer
     """
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop_rate=0., attn_drop_rate=0.,
-                 drop_path_rate=0.1, hybrid_backbone=None, norm_layer=nn.LayerNorm, num_frames=8, 
+                 drop_path_rate=0.1, hybrid_backbone=None, norm_layer=nn.LayerNorm, num_frames=8, num_joints=13, 
                  attention_type='divided_space_time', dropout=0., num_pose_blocks=1, pose_block_pos=-1, pose_block_attention=None):
         super().__init__()
         self.attention_type = attention_type
         self.depth = depth
         self.dropout = nn.Dropout(dropout)
         self.num_classes = num_classes
+        self.num_joints = num_joints
         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
         self.patch_embed = PatchEmbed(
             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
@@ -358,19 +193,21 @@ class VisionTransformer(nn.Module):
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, self.depth)]  # stochastic depth decay rule
         blocks = []
 
-        self.pose_block_pos = pose_block_pos
+        self.pose_block_pos = np.array(pose_block_pos)
+        block_idx = -1
         for i in range(self.depth):
             is_pose_block = False
 
-            if i == pose_block_pos-1:
-                print(f'Placing pose block after layer {pose_block_pos}')
+            if i in self.pose_block_pos-1:
+                print(f'Placing pose block after layer {pose_block_pos[block_idx]} - {pose_block_attention[block_idx]} block')
                 is_pose_block = True
+                block_idx += 1
             
             blocks.append(
                 Block(
                     dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                     drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, attention_type=self.attention_type,
-                    is_pose_block=is_pose_block, num_pose_blocks=num_pose_blocks, pose_block_attention=pose_block_attention)
+                    is_pose_block=is_pose_block, num_pose_blocks=num_pose_blocks, pose_block_attention=pose_block_attention[block_idx], num_joints=self.num_joints)
             )
 
         self.blocks = nn.ModuleList(blocks)
@@ -459,7 +296,7 @@ class VisionTransformer(nn.Module):
         ## Attention blocks
         pose_block_attentions = []
         for i, blk in enumerate(self.blocks):
-            if i == self.pose_block_pos-1:
+            if i in self.pose_block_pos-1:
                 x, learned_mask = blk(x, B, T, W)
                 pose_block_attentions.append(learned_mask)
             else:
@@ -503,12 +340,15 @@ class vit_poseblock_auxloss_patch16_224(nn.Module):
         if cfg.EXPERIMENTAL.POSE_BLOCK_ATTN == 'joint':
             raise NotImplementedError('Aux loss not implemented with joint poseblock')
 
+        assert type(cfg.EXPERIMENTAL.POSE_BLOCK_POS) == list, 'EXPERIMENTAL.POSE_BLOCK_POS should be a list'
+        assert type(cfg.EXPERIMENTAL.POSE_BLOCK_ATTN) == list, 'EXPERIMENTAL.POSE_BLOCK_ATTN should be a list'
+
         self.model = VisionTransformer(img_size=cfg.DATA.TRAIN_CROP_SIZE, num_classes=cfg.MODEL.NUM_CLASSES, patch_size=patch_size, 
                                     embed_dim=768, depth=cfg.TIMESFORMER.DEPTH, num_heads=12, mlp_ratio=4, qkv_bias=True, 
                                     norm_layer=partial(nn.LayerNorm, eps=1e-6), drop_rate=0., attn_drop_rate=0., 
                                     drop_path_rate=0.1, num_frames=cfg.DATA.NUM_FRAMES, attention_type=cfg.TIMESFORMER.ATTENTION_TYPE, 
                                     num_pose_blocks=cfg.EXPERIMENTAL.NUM_POSE_BLOCKS, pose_block_pos=cfg.EXPERIMENTAL.POSE_BLOCK_POS, 
-                                    pose_block_attention=cfg.EXPERIMENTAL.POSE_BLOCK_ATTN, **kwargs
+                                    pose_block_attention=cfg.EXPERIMENTAL.POSE_BLOCK_ATTN, num_joints=cfg.EXPERIMENTAL.NUM_JOINTS, **kwargs
         )
 
         self.attention_type = cfg.TIMESFORMER.ATTENTION_TYPE
@@ -519,7 +359,6 @@ class vit_poseblock_auxloss_patch16_224(nn.Module):
             load_pretrained(self.model, num_classes=self.model.num_classes, in_chans=kwargs.get('in_chans', 3), filter_fn=_conv_filter, img_size=cfg.DATA.TRAIN_CROP_SIZE, num_patches=self.num_patches, attention_type=self.attention_type, pretrained_model=pretrained_model, pose_block_model=True)
 
     def forward(self, x, kpt_masks):
-        # Keypoint masks will be ignored
         kpt_masks = kpt_masks.float()
         gt_mask = kpt_masks
 

@@ -6,6 +6,8 @@ import torch
 import torch.utils.data
 from fvcore.common.file_io import PathManager
 
+import numpy as np
+
 import timesformer.utils.logging as logging
 
 from . import decoder as decoder
@@ -120,6 +122,9 @@ class Ntu(torch.utils.data.Dataset):
                 len(self._path_to_videos), path_to_file
             )
         )
+
+        if self.cfg.EXPERIMENTAL.DEBUG.RANDOM_MASK:
+            logger.warning('Using random keypoint mask for debugging (EXPERIMENTAL.DEBUG.RANDOM_MASK is True). Make sure this is what you want.')
 
     def __getitem__(self, index):
         """
@@ -283,15 +288,30 @@ class Ntu(torch.utils.data.Dataset):
                 inverse_uniform_sampling=self.cfg.DATA.INV_UNIFORM_SAMPLE,
                 keypoints=keypoints
             )
-            
+
             # Generate the attention mask from the keypoints
-            keypoint_attention_mask = pose_utils.keypoints_2_patch_idx(
-                keypoints=keypoints, 
-                patch_size=16, 
-                frame_height=self.cfg.DATA.TRAIN_CROP_SIZE, 
-                frame_width=self.cfg.DATA.TRAIN_CROP_SIZE,
-                inflation=self.cfg.DUAL_BRANCH_TIMESFORMER.POSE_INFLATION
-            )
+            # grab 2D joints
+            if self.cfg.MODEL.MODEL_NAME != 'vit_poseblock_auxloss_patch16_224':
+                keypoint_attention_mask = pose_utils.keypoints_2_patch_idx(
+                    keypoints=keypoints, 
+                    patch_size=16, 
+                    frame_height=self.cfg.DATA.TRAIN_CROP_SIZE, 
+                    frame_width=self.cfg.DATA.TRAIN_CROP_SIZE,
+                    inflation=self.cfg.DUAL_BRANCH_TIMESFORMER.POSE_INFLATION
+                )
+            # grab 3D joints
+            else:
+                keypoint_attention_mask = pose_utils.keypoints_2_patch_joint_labels(
+                    keypoints=keypoints,
+                    patch_size=16,
+                    frame_height=self.cfg.DATA.TRAIN_CROP_SIZE,
+                    frame_width=self.cfg.DATA.TRAIN_CROP_SIZE,
+                    njts=njts,
+                )
+
+            # Random joints if desired
+            if self.cfg.EXPERIMENTAL.DEBUG.RANDOM_MASK:
+                keypoint_attention_mask = np.random.randint(0, 2, keypoint_attention_mask.shape)
                 
             if self.cfg.EXPERIMENTAL.DEBUG.MASK_FILL is None:
                 keypoint_attention_mask = torch.tensor(keypoint_attention_mask)

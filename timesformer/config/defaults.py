@@ -313,16 +313,20 @@ _C.EMA.ENABLED = False
 
 ##
 ##
-####### Experimental config options
+## Config options for PoseAwareVT
 ##
 ##
 _C.EXPERIMENTAL = CfgNode()
-_C.EXPERIMENTAL.NUM_POSE_BLOCKS = 1
-_C.EXPERIMENTAL.POSE_BLOCK_POS = 6 # Which layer the pose block should come after (1-indexed)
-_C.EXPERIMENTAL.POSE_BLOCK_ATTN = 'spatial'
+_C.EXPERIMENTAL.NUM_POSE_BLOCKS = 1 # Controls the number of PAAB's or PAAT's
+_C.EXPERIMENTAL.POSE_BLOCK_POS = [1] # Which layer PAAB or PAAT should come after (1-indexed)
+_C.EXPERIMENTAL.POSE_BLOCK_ATTN = ['spatial']
+_C.EXPERIMENTAL.NUM_JOINTS = 13 # 13 for Smarthome, 25 for NTU, 18 for NUCLA
+
+_C.EXPERIMENTAL.AUX_LOSS_SCALE = 1.0
 
 _C.EXPERIMENTAL.DEBUG = CfgNode()
 _C.EXPERIMENTAL.DEBUG.MASK_FILL = None # 0, 1, or None. If not None, will fill the kpt_masks with the specified value
+_C.EXPERIMENTAL.DEBUG.RANDOM_MASK = False # If True, will randomly mask out kpt_masks
 
 
 

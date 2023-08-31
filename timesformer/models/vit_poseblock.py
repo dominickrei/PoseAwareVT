@@ -76,21 +76,32 @@ class Attention(nn.Module):
            qkv = x.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
            q, k, v  = qkv, qkv, qkv
 
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-
-        # attention mask is given
+        # Given human mask
         if human_mask is not None:
-            attn = human_mask[:, None, :, :] + attn
+            attn = (q @ k.transpose(-2, -1)) * self.scale
 
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
+            attn_human = human_mask[:, None, :, :] + attn
+            attn_human = self.attn_drop(attn_human.softmax(dim=-1))
 
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        if self.with_qkv:
-            x = self.proj(x)
-            x = self.proj_drop(x)
+            x_human = (attn_human @ v).transpose(1, 2).reshape(B, N, C)
 
-        return x
+            if self.with_qkv:
+                x_human = self.proj_drop(self.proj(x_human))
+
+            return x_human
+
+        # No mask
+        else:
+            attn = (q @ k.transpose(-2, -1)) * self.scale
+            attn = attn.softmax(dim=-1)
+            attn = self.attn_drop(attn)
+
+            x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+            if self.with_qkv:
+                x = self.proj(x)
+                x = self.proj_drop(x)
+
+            return x
 
 class Block(nn.Module):
 
@@ -148,19 +159,6 @@ class Block(nn.Module):
 
             # Process mask
             if self.is_pose_block and kpt_masks != None:
-                # DEBUG: randomize patches
-                '''
-                random_mask = torch.zeros(kpt_masks.shape)
-                idxs = np.arange(0, random_mask.shape[-1])
-
-                for i, num_hum_patches in enumerate(kpt_masks.sum(dim=1)):
-                    num_hum_patches = num_hum_patches.item()
-                    random_idxs = np.random.choice(idxs, int(num_hum_patches), replace=False)
-                    random_mask[i, random_idxs] = 1
-
-                    assert random_mask[i].sum() == num_hum_patches
-                '''
-                # END DEBUG: randomize patches
                 mask = kpt_masks
                 if self.pose_block_attention != 'joint':
                     mask = rearrange(mask, 'b (t n) -> (b t) n', b=B, t=T, n=num_spatial_tokens)
@@ -411,19 +409,21 @@ class VisionTransformer(nn.Module):
 
         blocks = []
 
-        self.pose_block_pos = pose_block_pos
+        self.pose_block_pos = np.array(pose_block_pos)
+        block_idx = -1
         for i in range(self.depth):
             is_pose_block = False
 
-            if i == pose_block_pos-1:
-                print(f'Placing pose block after layer {pose_block_pos}')
+            if i in self.pose_block_pos-1:
+                print(f'Placing pose block after layer {pose_block_pos[block_idx]} - {pose_block_attention[block_idx]} block')
                 is_pose_block = True
+                block_idx += 1
             
             blocks.append(
                 Block(
                     dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
                     drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, attention_type=self.attention_type,
-                    is_pose_block=is_pose_block, num_pose_blocks=num_pose_blocks, pose_block_attention=pose_block_attention)
+                    is_pose_block=is_pose_block, num_pose_blocks=num_pose_blocks, pose_block_attention=pose_block_attention[block_idx])
             )
 
         self.blocks = nn.ModuleList(blocks)
@@ -511,7 +511,7 @@ class VisionTransformer(nn.Module):
 
         ## Attention blocks
         for i, blk in enumerate(self.blocks):
-            if i == self.pose_block_pos-1:
+            if i in self.pose_block_pos-1:
                 x = blk(x, kpt_masks, B, T, W)
             else:
                 x = blk(x, None, B, T, W)

@@ -22,21 +22,21 @@ def json_2_keypoints(pose_path):
   filehandle = open(f'{pose_path}', 'rb')
   json = simplejson.load(filehandle)
   njts = json['njts']
-  K = json['K']
+#  K = json['K']
   num_frames = len(json['frames'])
 
-  keypoints = np.zeros((num_frames, 13, 2)) - 1
+  keypoints = np.zeros((num_frames, njts, 2)) - 1
   mask = np.zeros(num_frames)
 
   for frm_idx in range(num_frames):
-    if len(json['frames'][frm_idx]) >= 1: # frames containing no keypoints are represented as an empty list
+    if (len(json['frames'][frm_idx]) >= 1) and (np.all(np.array(json['frames'][frm_idx][0]['pose2d']) != -1)): # frames containing no keypoints are represented as an empty list
       frm_pose_info = np.array(json['frames'][frm_idx][0]['pose2d'])
-      frm_pose_info_p = np.reshape(frm_pose_info, (13, 2), 'F')
+      frm_pose_info_p = np.reshape(frm_pose_info, (njts, 2), 'F')
 
       keypoints[frm_idx, :, :] = frm_pose_info_p
       mask[frm_idx] += 1
 
-  return keypoints, mask, njts, K
+  return keypoints, mask, njts
 
 def npy_to_keypoints(pose_path):
   '''
