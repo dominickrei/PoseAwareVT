@@ -41,7 +41,7 @@ class Attention(nn.Module):
            qkv = x.reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
            q, k, v  = qkv, qkv, qkv
 
-	attn = (q @ k.transpose(-2, -1)) * self.scale
+        attn = (q @ k.transpose(-2, -1)) * self.scale
 
         # It is more efficient to *add* the mask containing negative infinity
         # But here we do an elementwise multiplication (with the mask containing 0,1) to make optimization easier
