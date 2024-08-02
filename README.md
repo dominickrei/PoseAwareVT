@@ -1,5 +1,5 @@
 $${\color{orange}Notice}$$
-**The paper originally associated with this code ("Seeing the Pose in the Pixels: Learning Pose-Aware Representations in Vision Transformers") has evolved into [PI-ViT](google.com) and [PAAB](https://github.com/dominickrei/PAAB). Please refer to these works instead!**
+**The paper originally associated with this code ("Seeing the Pose in the Pixels: Learning Pose-Aware Representations in Vision Transformers") has evolved into [PI-ViT](https://github.com/dominickrei/pi-vit/) and [PAAB](https://github.com/dominickrei/PAAB). Please refer to these works instead!**
 $${\color{orange}Notice}$$
 
 # Seeing the Pose in the Pixels: Learning Pose-Aware Representations in Vision Transformers
